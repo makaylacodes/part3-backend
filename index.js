@@ -1,8 +1,9 @@
 const express = require('express')
+const cors = require('cors')
 const morgan = require('morgan')
 
 const app = express()
-const cors = require('cors')
+
 
 // Middleware is a function that receives 3 params; it's a function that can 
 //be used to handle request and response objects.
