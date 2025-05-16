@@ -1,9 +1,11 @@
 const express = require('express')
+const app = express()
 const cors = require('cors')
 const morgan = require('morgan')
+const path = require('path')
 
-const app = express()
-
+// need to use "npm install dotenv" to make sure can access variables in .env file
+require('dotenv').config()
 
 // Middleware is a function that receives 3 params; it's a function that can 
 //be used to handle request and response objects.
@@ -16,163 +18,190 @@ morgan.token('body', (req) => {
     : ''
 })
 
+// Serves up the static file for the phonebook frontend React application
+app.use(express.static(path.join(__dirname, 'dist')))
+
 app.use(cors())
-app.use(morgan(':method :url :status :res[content-length] - :response-time ms :body'))
 app.use(express.json())
+app.use(morgan(':method :url :status :res[content-length] - :response-time ms :body'))
 
-let persons = [
-      {
-        "name": "Arto Hellas",
-        "number": "040-123456",
-        "id": "1"
-      },
-      {
-        "name": "Ada Lovelace",
-        "number": "39-44-5323523",
-        "id": "2"
-      },
-      {
-        "name": "Dan Abramov",
-        "number": "12-43-234345",
-        "id": "3"
-      },
-      {
-        "name": "Mary Poppendieck",
-        "number": "39-23-6423122",
-        "id": "4"
-      },
-      {
-        "id": "5",
-        "name": "Slappy Sa",
-        "number": "453-53-4232"
-      },
-      {
-        "id": "6",
-        "name": "Angie Loew",
-        "number": "232-4334"
-      },
-      {
-        "name": "hi",
-        "number": "1234",
-        "id": "7"
-      },
-      {
-        "name": "Jamie",
-        "number": "75546",
-        "id": "8"
-      },
-      {
-        "name": "Hammajs ",
-        "number": "1232324",
-        "id": "9"
-      },
-      {
-        "name": "bew",
-        "number": "32324",
-        "id": "10"
+
+
+// Establishes constructor function that creates a new JS object, Person
+const Person = require('./models/person')
+
+
+app.get('/', (request, response) => {
+    response.sendFile(path.join(__dirname, 'dist', 'index.html'))
+})
+
+// Exercise 3.13, returns all person objects in the mongodb database
+app.get('/info', (request, response) => {
+    const dateTime = () => new Date().toString({})
+
+    // Displays date, time, and number of persons in mongodb database
+    Person.find({}).countDocuments({})
+    .then(persons => {
+      console.log("Success")
+      console.log("This is persons count: ", persons)
+    
+      // What displays in the browser
+      response.send(`<h1>Hello World</h1> <p>Phonebook has info for <b>${persons}</b> people</p>
+        <p>${dateTime()}</p>`)
+      })
+    .catch((error) => {
+      console.error("Error fetching count:", error)
+    })
+
+    
+})
+
+// returns the entire list of persons, person objects with names, numbers, and ids
+app.get('/api/persons', (request, response, next) => {
+  try{
+    Person.find({}).then(persons => {
+      response.json(persons)
+
+      console.log("phonebook:")
+      return persons.forEach(person => {
+        console.log(`${person.name} ${person.number} ${person.id}`)
+      })
+      
+    })
+  }
+  catch (error){
+    next(error)
+  }
+})
+
+// Exercise 3.14, implements functionality to add a new person to the phonebook database in mongodb
+app.post('/api/persons', (request, response, next) => {
+    
+  const body = request.body
+  console.log("this is request.body : ", body)
+  
+  const personObj = new Person({
+    name: body.name,
+    number: body.number
+  })
+
+   /* if (!personObj.name){
+      return response.status(400).json({
+        error: 'name is missing'
+      })
+    }
+
+    else if (!personObj.number){
+      return response.status(400).json({
+        error: 'number is missing'
+      })
+    }
+    */
+
+    // Block below checks whether or not the person's name already exists in the phonebook. If it doesn't
+    // then the new person object will be saved to the phonebook
+  Person.findOne({name : { $regex: new RegExp('^' + personObj.name + '$', 'i')} })
+  .then(person => {
+    console.log("This is person found with regex: ", person)
+
+    if(person){
+      return response.status(400).json({
+        error: 'name must be unique'
+      })
+    }
+
+    return personObj.save().then(savedPerson => {
+      console.log("This name is unique and being saved: ", savedPerson)
+      response.json(savedPerson)
+    })
+  })
+  .catch(error => {
+    next(error)
+  })
+
+  console.log("This is the new person object : ", personObj)
+
+})
+
+app.put('/api/persons/:name', (request, response, next) => {
+  // gets rid of the whitespaces in a name
+  const name = request.params.name.trim()
+  const body = request.body
+
+  const person = {
+    number: body.number
+  }
+
+  Person.findOneAndUpdate({name}, person, { new: true, runValidators: true, context: 'query' })
+  .then(updatedPerson => {
+    console.log("Successfully updated person")
+    return response.json(updatedPerson)
+    
+  })
+  .catch(error => next(error))
+})
+
+// returns one specific person object in the persons list
+// Exercise 3.13, implement functionality to display a single entry from the mongodb database
+app.get('/api/persons/:id', (request, response, next) => {
+    // saves the id of the person being requested in the url
+    const id = request.params.id
+
+   //  Save for when the database is redone
+    Person.findById(id).then(person => {
+      // If no person with the id is found, send error message
+      if(person){
+        // if person with id is found, then return that object
+        console.log("Person was found")
+        return response.json(person) 
       }
-    ]
-
-
-
+      
+    })
+    .catch(error => {
+      console.log("Person not found")
+      next(error)
+    })
+})
+ 
+// deletes one specific person object in the persons list
+// Exercise 3.4, implement functionality to delete one specific entry in mongodb database
+app.delete('/api/persons/:id', (request, response, next) => {
+  const id = request.params.id
+  // saves the id of the person being requested in the url
+  Person.findByIdAndDelete(id)
+  .then(result => {
+    console.log("Person was found and deleted")
+    return response.status(204).end()
+  })
+  .catch(error => {
+    console.log("Person was not successfully deleted")
+    next(error)
+  })
+}) 
 
 const unknownEndpoint = (request, response) => {
   response.status(404).send({ error: 'unknown endpoint' })
 }
+  
+// If the server sends a 404 response, then send the json message it's an unknown endpoint
+app.use(unknownEndpoint)
 
-app.get('/', (request, response) => {
-    response.send('<h1>Hello World</h1>')
-})
+const errorHandler = (error, request, response, next) => {
+   console.error(error.message)
 
-app.get('/info', (request, response) => {
-    const dateTime = () => new Date().toString()
-    response.send(`<h1>Hello World</h1> <p>Phonebook has info for <b>${persons.length}</b> people</p>
-        <p>${dateTime()}</p>`)
-})
-// returns the entire list of persons, person objects with names, numbers, and ids
-app.get('/api/persons', (request, response) => {
-    if(!persons){
-      app.use(unknownEndpoint)
-    }
-    response.json(persons)
-})
+  if (error.name === 'CastError') {
+    return response.status(400).send({ error: 'malformatted id' })
 
-
-const generateId = () => {
-    const maxId = persons.length > 0
-      ? Math.max(...persons.map(person => Number(person.id)))
-      : 0
-    return String(maxId + 1)
+  } else if (error.name === 'ValidationError') {
+    return response.status(400).json({ error: error.message })
+  }
+ 
+  next(error)
 }
 
-// Exercise 3.5, implement functionality to add a new person to the phonebook + generate a new ID
-app.post('/api/persons', (request, response) => {
-    
-    const body = request.body
-    console.log("this is request.body : ", body)
+app.use(errorHandler)
 
-    if (body.content) {
-      return response.status(400).json({ 
-        error: 'content missing' 
-      })
-    }
-  
-    const person = {
-        name: body.name,
-        number: body.number,
-        id: generateId()
-      }
-
-    if (!person.name){
-        return response.status(400).json({
-            error: 'name is missing'
-        })
-    }
-    else if (!person.number){
-        return response.status(400).json({
-            error: 'number is missing'
-        })
-        }
-    
-    else if (persons.find((p) => p.name === person.name) || persons.find((p) => p.number === person.number)){
-        return response.status(400).json({
-            error: 'name must be unique'
-        })
-    }
-    console.log("This is the new person object : ", person)
-    persons = persons.concat(person)
-  
-    response.json(person)
-  })
-
-// returns one specific person object in the persons list
-// Exercise 3.3, implement functionality to display a single entry
-app.get('/api/persons/:id', (request, response) => {
-    // saves the id of the person being requested in the url
-    const id = request.params.id
-
-    // saves the one person object that has an id that matches the id in url request
-    const person = persons.find(person => person.id === id)
-
-    // return that person object in json if the id exists, if not then 404 not found code returned
-    person ? response.json(person) : response.status(404).end()
-    
-})
-
-// deletes one specific person object in the persons list
-// Exercise 3.4, implement functionality to delete one specific entry
-app.delete('/api/persons/:id', (request, response) => {
-    // saves the id of the person being requested in the url
-    const id = request.params.id
-
-    // update the array by filtering out the person with the id in the delete request, removes from list
-    persons = persons.filter(person => person.id !== id)
-
-    //return confirmation status, no content matching left for the id
-    response.status(204).end()
-})
-
-const PORT = process.env.PORT || 3002
+const PORT = process.env.PORT || 3001
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`)
